@@ -24,7 +24,7 @@ cat <<EOF > "$DESKTOP_FILE"
 Name=MacTahoe Theme Manager
 Comment=Manage and install the MacTahoe GTK Theme
 Exec=$WRAPPER
-Icon=preferences-desktop-appearance
+Icon=$APP_DIR/mactahoe-manager-icon.svg
 Terminal=false
 Type=Application
 Categories=Utility;Settings;

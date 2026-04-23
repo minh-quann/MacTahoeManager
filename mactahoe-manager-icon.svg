@@ -1,0 +1,56 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <!-- Background Gradient (Mac OS Dark Blue) -->
+    <linearGradient id="macBg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#1e3c72"/>
+      <stop offset="100%" stop-color="#2a5298"/>
+    </linearGradient>
+
+    <!-- Mountain Gradients -->
+    <linearGradient id="mountain" x1="50%" y1="0%" x2="50%" y2="100%">
+      <stop offset="0%" stop-color="#FFFFFF"/>
+      <stop offset="100%" stop-color="#E0EAFC" stop-opacity="0.8"/>
+    </linearGradient>
+
+    <linearGradient id="mountain2" x1="50%" y1="0%" x2="50%" y2="100%">
+      <stop offset="0%" stop-color="#FFFFFF" stop-opacity="0.9"/>
+      <stop offset="100%" stop-color="#8E9EAB" stop-opacity="0.6"/>
+    </linearGradient>
+
+    <!-- Theme Brush Stroke Gradient -->
+    <linearGradient id="brushStroke" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#FF512F"/>
+      <stop offset="50%" stop-color="#DD2476"/>
+      <stop offset="100%" stop-color="#F5AF19"/>
+    </linearGradient>
+
+    <!-- Shadows -->
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="15" stdDeviation="25" flood-color="#000000" flood-opacity="0.3"/>
+    </filter>
+  </defs>
+
+  <!-- Squircle Base for App Icon -->
+  <rect x="112" y="112" width="800" height="800" rx="180" fill="url(#macBg)" filter="url(#shadow)"/>
+
+  <!-- Icon Content -->
+  <g transform="translate(112, 112)">
+    
+    <!-- Sun / Moon Element -->
+    <circle cx="600" cy="250" r="80" fill="#FFD700" filter="url(#shadow)"/>
+
+    <!-- Background Mountain -->
+    <path d="M 150 700 L 450 320 L 750 700 Z" fill="url(#mountain2)" filter="url(#shadow)"/>
+    
+    <!-- Foreground Mountain (Tahoe Peak) -->
+    <path d="M -20 800 L 300 400 L 650 800 Z" fill="url(#mountain)" filter="url(#shadow)"/>
+
+    <!-- Theme Brush Stroke / Color Ribbon representing "Manager/Theme" -->
+    <path d="M 80 620 C 250 480, 450 700, 720 480" 
+          fill="none" 
+          stroke="url(#brushStroke)" 
+          stroke-width="50" 
+          stroke-linecap="round" 
+          filter="url(#shadow)"/>
+  </g>
+</svg>

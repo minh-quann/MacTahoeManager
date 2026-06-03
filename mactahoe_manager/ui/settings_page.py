@@ -1,7 +1,12 @@
 import subprocess
 import threading
 from gi.repository import Gtk, Adw, GLib
-from mactahoe_manager.config import REPO_DIR
+import mactahoe_manager.config as cfg
+from mactahoe_manager.core.version_checker import (
+    check_version, pull_and_get_changelog,
+    UpdateStatus, VersionInfo
+)
+
 
 class SettingsPage:
     def __init__(self, app_window):
@@ -13,11 +18,16 @@ class SettingsPage:
         self.ACCENTS = ["default", "blue", "purple", "pink", "red", "orange", "yellow", "green", "grey", "all"]
 
         self._build_ui()
+        # Auto-check version on page load
+        self._start_version_check()
 
     def get_page(self):
         return self.page
 
     def _build_ui(self):
+        # ── 0. Version Info ──
+        self._build_version_section()
+
         # ── 1. Appearance ──
         group_colors = Adw.PreferencesGroup(title="Giao diện cơ bản (Appearance)")
         self.page.add(group_colors)
@@ -75,14 +85,6 @@ class SettingsPage:
         row_install.add_suffix(btn_install)
         group_actions.add(row_install)
 
-        row_update = Adw.ActionRow(title="Cập nhật mã nguồn")
-        btn_update = Gtk.Button(label="Cập nhật (Pull)")
-        btn_update.add_css_class("pill")
-        btn_update.set_valign(Gtk.Align.CENTER)
-        btn_update.connect("clicked", self.on_update_clicked)
-        row_update.add_suffix(btn_update)
-        group_actions.add(row_update)
-
         row_uninstall = Adw.ActionRow(title="Gỡ cài đặt hoàn toàn")
         btn_uninstall = Gtk.Button(label="Gỡ (Uninstall)")
         btn_uninstall.add_css_class("destructive-action")
@@ -91,6 +93,211 @@ class SettingsPage:
         btn_uninstall.connect("clicked", self.on_uninstall_clicked)
         row_uninstall.add_suffix(btn_uninstall)
         group_actions.add(row_uninstall)
+
+    # ── Version Section ──
+
+    def _build_version_section(self):
+        """Build the version info and update section at the top of the page."""
+        self.group_version = Adw.PreferencesGroup(title="Phiên bản & Cập nhật")
+        self.page.add(self.group_version)
+
+        # Local version row
+        self.row_local_ver = Adw.ActionRow(
+            title="Phiên bản hiện tại",
+            subtitle="Đang kiểm tra..."
+        )
+        self.row_local_ver.set_icon_name("drive-harddisk-symbolic")
+        self.group_version.add(self.row_local_ver)
+
+        # Remote version row
+        self.row_remote_ver = Adw.ActionRow(
+            title="Phiên bản mới nhất",
+            subtitle="Đang kiểm tra..."
+        )
+        self.row_remote_ver.set_icon_name("network-server-symbolic")
+        self.group_version.add(self.row_remote_ver)
+
+        # Update status row with action buttons
+        self.row_update_status = Adw.ActionRow(
+            title="Trạng thái",
+            subtitle="Đang kiểm tra cập nhật..."
+        )
+        self.row_update_status.set_icon_name("emblem-synchronizing-symbolic")
+
+        # Spinner for checking state
+        self.version_spinner = Gtk.Spinner()
+        self.version_spinner.start()
+        self.row_update_status.add_suffix(self.version_spinner)
+
+        # Status badge label (hidden initially)
+        self.status_badge = Gtk.Label()
+        self.status_badge.set_valign(Gtk.Align.CENTER)
+        self.status_badge.set_visible(False)
+        self.row_update_status.add_suffix(self.status_badge)
+
+        # Check version button
+        self.btn_check = Gtk.Button(icon_name="view-refresh-symbolic")
+        self.btn_check.set_valign(Gtk.Align.CENTER)
+        self.btn_check.set_tooltip_text("Kiểm tra phiên bản mới")
+        self.btn_check.add_css_class("flat")
+        self.btn_check.connect("clicked", self._on_check_clicked)
+        self.btn_check.set_visible(False)
+        self.row_update_status.add_suffix(self.btn_check)
+
+        self.group_version.add(self.row_update_status)
+
+        # Update + reinstall button row (hidden until update available)
+        self.row_update_action = Adw.ActionRow(
+            title="Cập nhật Theme",
+            subtitle="Tải mã nguồn mới và cài đặt lại theme"
+        )
+        self.row_update_action.set_icon_name("software-update-available-symbolic")
+
+        self.btn_update_theme = Gtk.Button(label="Cập nhật ngay")
+        self.btn_update_theme.add_css_class("suggested-action")
+        self.btn_update_theme.add_css_class("pill")
+        self.btn_update_theme.set_valign(Gtk.Align.CENTER)
+        self.btn_update_theme.connect("clicked", self._on_update_theme_clicked)
+        self.row_update_action.add_suffix(self.btn_update_theme)
+
+        self.row_update_action.set_visible(False)
+        self.group_version.add(self.row_update_action)
+
+    def _format_date(self, date_str):
+        """Format git date string to a more readable form."""
+        if not date_str:
+            return "N/A"
+        # Git date format: 2026-05-29 16:24:45 +0800
+        try:
+            parts = date_str.split(" ")
+            return f"{parts[0]}  {parts[1]}"
+        except Exception:
+            return date_str
+
+    def _start_version_check(self):
+        """Initiate an async version check."""
+        self.version_spinner.set_visible(True)
+        self.version_spinner.start()
+        self.status_badge.set_visible(False)
+        self.btn_check.set_visible(False)
+        self.row_update_action.set_visible(False)
+        self.row_update_status.set_subtitle("Đang kiểm tra cập nhật...")
+
+        check_version(cfg.REPO_DIR, lambda info: GLib.idle_add(self._on_version_checked, info))
+
+    def _on_version_checked(self, info):
+        """Callback when version check completes. Runs on main thread."""
+        self.version_spinner.stop()
+        self.version_spinner.set_visible(False)
+        self.btn_check.set_visible(True)
+        self.status_badge.set_visible(True)
+
+        # Update local version info
+        if info.local_short_hash:
+            local_date = self._format_date(info.local_date)
+            self.row_local_ver.set_subtitle(
+                f"{info.local_short_hash}  •  {local_date}\n{info.local_message}"
+            )
+        else:
+            self.row_local_ver.set_subtitle("Không xác định")
+
+        # Update remote version info
+        if info.remote_short_hash:
+            remote_date = self._format_date(info.remote_date)
+            self.row_remote_ver.set_subtitle(
+                f"{info.remote_short_hash}  •  {remote_date}\n{info.remote_message}"
+            )
+        else:
+            self.row_remote_ver.set_subtitle("Không thể kiểm tra")
+
+        # Update status badge and action row visibility
+        if info.status == UpdateStatus.UP_TO_DATE:
+            self.status_badge.set_label("✓ Đã mới nhất")
+            self.status_badge.add_css_class("success")
+            self.row_update_status.set_subtitle("Theme đang ở phiên bản mới nhất.")
+            self.row_update_status.set_icon_name("emblem-ok-symbolic")
+            self.row_update_action.set_visible(False)
+
+        elif info.status == UpdateStatus.UPDATE_AVAILABLE:
+            behind_text = f"{info.commits_behind} commit" if info.commits_behind > 0 else ""
+            self.status_badge.set_label(f"⬆ Có bản mới ({behind_text})" if behind_text else "⬆ Có bản mới")
+            self.status_badge.add_css_class("accent")
+            self.row_update_status.set_subtitle(
+                f"Có {info.commits_behind} commit mới cần cập nhật." if info.commits_behind > 0
+                else "Có phiên bản mới cần cập nhật."
+            )
+            self.row_update_status.set_icon_name("software-update-available-symbolic")
+            self.row_update_action.set_visible(True)
+
+        else:
+            self.status_badge.set_label("⚠ Lỗi")
+            self.status_badge.add_css_class("error")
+            self.row_update_status.set_subtitle("Không thể kiểm tra cập nhật. Kiểm tra kết nối mạng.")
+            self.row_update_status.set_icon_name("dialog-warning-symbolic")
+            self.row_update_action.set_visible(False)
+
+        return False
+
+    def _on_check_clicked(self, btn):
+        """Re-check version when refresh button is clicked."""
+        # Remove old CSS classes from badge
+        for cls in ["success", "accent", "error"]:
+            self.status_badge.remove_css_class(cls)
+        self._start_version_check()
+
+    def _on_update_theme_clicked(self, btn):
+        """Pull latest code and reinstall theme automatically."""
+        btn.set_sensitive(False)
+        btn.set_label("Đang cập nhật...")
+
+        def run_update():
+            # Step 1: Pull latest code
+            success, changelog, error = pull_and_get_changelog(cfg.REPO_DIR)
+            if not success:
+                GLib.idle_add(self._on_update_complete, btn, False, f"Lỗi khi tải mã nguồn: {error}", [])
+                return
+
+            # Step 2: Reinstall theme with current settings
+            try:
+                args = self._build_install_args()
+                subprocess.run(args, cwd=cfg.REPO_DIR, check=True)
+
+                # Apply theme via gsettings
+                theme_name = self._build_theme_name()
+                subprocess.run(["gsettings", "set", "org.gnome.desktop.interface", "gtk-theme", theme_name])
+                subprocess.run(["gsettings", "set", "org.gnome.desktop.wm.preferences", "theme", theme_name])
+
+                GLib.idle_add(self._on_update_complete, btn, True, theme_name, changelog)
+            except Exception as e:
+                GLib.idle_add(self._on_update_complete, btn, False, str(e), [])
+
+        threading.Thread(target=run_update, daemon=True).start()
+
+    def _on_update_complete(self, btn, success, detail, changelog):
+        """Handle update completion on the main thread."""
+        btn.set_sensitive(True)
+        btn.set_label("Cập nhật ngay")
+
+        if success:
+            # Build success message with changelog
+            msg = f"Theme [{detail}] đã được cập nhật và kích hoạt!"
+            if changelog:
+                msg += "\n\nCác thay đổi mới:\n"
+                # Show max 10 entries to avoid overly long dialog
+                for entry in changelog[:10]:
+                    msg += f"  • {entry}\n"
+                if len(changelog) > 10:
+                    msg += f"  ... và {len(changelog) - 10} thay đổi khác"
+
+            self.show_success(msg)
+            # Re-check version to update the UI
+            self._start_version_check()
+        else:
+            self.show_error(detail)
+
+        return False
+
+    # ── Build helpers ──
 
     def _build_theme_name(self):
         name = "MacTahoe"
@@ -117,6 +324,8 @@ class SettingsPage:
         if self.row_libadwaita.get_active(): args.append("-l")
         return args
 
+    # ── Action handlers ──
+
     def on_install_clicked(self, btn):
         if not self.row_light.get_active() and not self.row_dark.get_active():
             dialog = Adw.MessageDialog(transient_for=self.win, heading="Cảnh báo", body="Vui lòng chọn ít nhất một biến thể màu!")
@@ -125,10 +334,10 @@ class SettingsPage:
             return
 
         args = self._build_install_args()
-        
+
         def run_install():
             try:
-                subprocess.run(args, cwd=REPO_DIR, check=True)
+                subprocess.run(args, cwd=cfg.REPO_DIR, check=True)
                 theme_name = self._build_theme_name()
                 subprocess.run(["gsettings", "set", "org.gnome.desktop.interface", "gtk-theme", theme_name])
                 subprocess.run(["gsettings", "set", "org.gnome.desktop.wm.preferences", "theme", theme_name])
@@ -138,36 +347,15 @@ class SettingsPage:
 
         btn.set_sensitive(False)
         btn.set_label("Đang cài...")
-        
+
         thread = threading.Thread(target=run_install, daemon=True)
         thread.start()
-        
+
         def restore_btn():
             btn.set_sensitive(True)
             btn.set_label("Cài đặt Theme")
             return False
-            
-        GLib.timeout_add(100, lambda: restore_btn() if not thread.is_alive() else True)
 
-    def on_update_clicked(self, btn):
-        def run_update():
-            try:
-                subprocess.run(["git", "pull"], cwd=REPO_DIR, check=True)
-                GLib.idle_add(self.show_success, "Đã cập nhật mã nguồn thành công!")
-            except Exception as e:
-                GLib.idle_add(self.show_error, str(e))
-                
-        btn.set_sensitive(False)
-        btn.set_label("Đang pull...")
-        
-        thread = threading.Thread(target=run_update, daemon=True)
-        thread.start()
-        
-        def restore_btn():
-            btn.set_sensitive(True)
-            btn.set_label("Cập nhật (Pull)")
-            return False
-            
         GLib.timeout_add(100, lambda: restore_btn() if not thread.is_alive() else True)
 
     def on_uninstall_clicked(self, btn):
@@ -183,7 +371,7 @@ class SettingsPage:
         def on_response(dlg, response):
             if response == "uninstall":
                 try:
-                    subprocess.run(["./install.sh", "-r"], cwd=REPO_DIR, check=True)
+                    subprocess.run(["./install.sh", "-r"], cwd=cfg.REPO_DIR, check=True)
                     subprocess.run(["gsettings", "set", "org.gnome.desktop.interface", "gtk-theme", "Adwaita"])
                     subprocess.run(["gsettings", "set", "org.gnome.desktop.wm.preferences", "theme", "Adwaita"])
                     self.show_success("Đã gỡ cài đặt và khôi phục về Adwaita!")
@@ -192,12 +380,12 @@ class SettingsPage:
 
         dialog.connect("response", on_response)
         dialog.present()
-        
+
     def show_success(self, msg):
         dlg = Adw.MessageDialog(transient_for=self.win, heading="Thành công", body=msg)
         dlg.add_response("ok", "Hoàn tất")
         dlg.present()
-        
+
     def show_error(self, msg):
         dlg = Adw.MessageDialog(transient_for=self.win, heading="Lỗi", body=msg)
         dlg.add_response("ok", "Đóng")
